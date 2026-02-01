@@ -1,41 +1,51 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net/http"
+	"strings"
+
+	"categories/database"
 	"categories/handlers"
+	"categories/repositories"
+	"categories/services"
+
+	"github.com/joho/godotenv"
+	"github.com/spf13/viper"
 )
 
+type Config struct {
+	Port   string `mapstructure:"PORT"`
+	DBConn string `mapstructure:"DB_CONN"`
+}
+
 func main() {
-	// Collection routes
-	http.HandleFunc("/api/categories", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			handlers.GetCategories(w, r)
-		case http.MethodPost:
-			handlers.PostCategory(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	// Load .env into environment variables
+	_ = godotenv.Load()
 
-	// Item routes (by ID)
-	http.HandleFunc("/api/categories/", func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
-			handlers.GetCategoryByID(w, r)
-		case http.MethodPut:
-			handlers.PutCategory(w, r)
-		case http.MethodDelete:
-			handlers.DeleteCategory(w, r)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
-	})
+	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	fmt.Println("Server running on http://localhost:8080")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		fmt.Println("Run Server Failed")
+	config := Config{
+		Port:   viper.GetString("PORT"),
+		DBConn: viper.GetString("DB_CONN"),
 	}
+
+	// log.Println("Config:", config)
+
+	db, err := database.InitDB(config.DBConn)
+	if err != nil {
+		log.Fatal("Failed to initialize database:", err)
+	}
+	defer db.Close()
+
+	productRepo := repositories.NewProductRepository(db)
+	productService := services.NewProductService(productRepo)
+	productHandler := handlers.NewProductHandler(productService)
+
+	http.HandleFunc("/api/products", productHandler.HandleProducts)
+	http.HandleFunc("/api/products/", productHandler.HandleProductByID)
+
+	log.Println("Server running on port", config.Port)
+	log.Fatal(http.ListenAndServe(":"+config.Port, nil))
 }
